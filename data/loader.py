@@ -61,8 +61,9 @@ def read_file(filename, vocab, opt, is_train):
         else:
             print(tokens)
             third_positions = list()
-
-        processed += [(tokens, pos, deprel, head, first_positions, second_positions, third_positions, cross, relation)]
+        sent_emb = d['sent_emb']
+        split_idx = d['split_idx']
+        processed += [(tokens, pos, deprel, head, first_positions, second_positions, third_positions, cross, relation, sent_emb, split_idx)]
     
     print(str(counter) + " instances are removed")
     indices = list(range(len(processed)))
