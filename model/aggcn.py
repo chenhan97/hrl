@@ -143,7 +143,6 @@ class DCGCN(nn.Module):
 
         if self.opt['pos_dim'] > 0:
             embs += [self.pos_emb(pos)]
-
         embs = torch.cat(embs, dim=2)
         embs = self.in_drop(embs)
 

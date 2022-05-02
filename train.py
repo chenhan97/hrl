@@ -13,6 +13,7 @@ import torch
 
 from data.loader import DataLoader, read_file
 from model.trainer import GCNTrainer
+from hrlmodel.hrltrainer import HRLTrainer
 from utils import nary_scorer, constant, helper
 from utils.vocab import Vocab
 
@@ -33,7 +34,8 @@ parser.add_argument('--lower', dest='lower', action='store_true', help='Lowercas
 parser.add_argument('--no-lower', dest='lower', action='store_false')
 parser.set_defaults(lower=False)
 
-parser.add_argument('--pooling', choices=['max', 'avg', 'sum', 'self-att'], default='max', help='Pooling function type. Default max.')
+parser.add_argument('--pooling', choices=['max', 'avg', 'sum', 'self-att'], default='max',
+                    help='Pooling function type. Default max.')
 parser.add_argument('--pooling_l2', type=float, default=0.002, help='L2-penalty for all pooling output.')
 parser.add_argument('--mlp_layers', type=int, default=2, help='Number of output mlp layers.')
 parser.add_argument('--conv_l2', type=float, default=0, help='L2-weight decay on conv layers only.')
@@ -41,7 +43,8 @@ parser.add_argument('--conv_l2', type=float, default=0, help='L2-weight decay on
 parser.add_argument('--lr', type=float, default=0.6, help='Applies to sgd and adagrad.')
 parser.add_argument('--lr_decay', type=float, default=0.9, help='Learning rate decay rate.')
 parser.add_argument('--decay_epoch', type=int, default=5, help='Decay learning rate after this epoch.')
-parser.add_argument('--optim', choices=['sgd', 'adagrad', 'adam', 'adamax'], default='sgd', help='Optimizer: sgd, adagrad, adam or adamax.')
+parser.add_argument('--optim', choices=['sgd', 'adagrad', 'adam', 'adamax'], default='sgd',
+                    help='Optimizer: sgd, adagrad, adam or adamax.')
 parser.add_argument('--num_epoch', type=int, default=60, help='Number of total training epochs.')
 parser.add_argument('--batch_size', type=int, default=50, help='Training batch size.')
 parser.add_argument('--max_grad_norm', type=float, default=5.0, help='Gradient clipping.')
@@ -65,7 +68,6 @@ parser.add_argument('--rnn_dropout', type=float, default=0.5, help='RNN dropout 
 
 parser.add_argument('--heads', type=int, default=2, help='Self attention heads')
 parser.add_argument('--max_len', type=int, default=500, help='Max sentence length')
-
 
 args = parser.parse_args()
 torch.manual_seed(args.seed)
@@ -92,7 +94,7 @@ assert emb_matrix.shape[0] == vocab.size
 assert emb_matrix.shape[1] == opt['emb_dim']
 
 print("Loading data from {} with batch size {}...".format(opt['data_dir'], opt['batch_size']))
-data = read_file(opt['data_dir'] + '/train.json', vocab, opt, True)
+data = read_file(opt['data_dir'] + '/test2.json', vocab, opt, True)
 
 dev_data = data[:200]
 train_data = data[200:]
@@ -108,15 +110,17 @@ helper.ensure_dir(model_save_dir, verbose=True)
 # save config
 helper.save_config(opt, model_save_dir + '/config.json', verbose=True)
 vocab.save(model_save_dir + '/vocab.pkl')
-file_logger = helper.FileLogger(model_save_dir + '/' + opt['log'], header="# epoch\ttrain_loss\tdev_loss\tdev_score\tbest_dev_score")
+file_logger = helper.FileLogger(model_save_dir + '/' + opt['log'],
+                                header="# epoch\ttrain_loss\tdev_loss\tdev_score\tbest_dev_score")
 
 # print model info
 helper.print_config(opt)
 
 # model
 trainer = GCNTrainer(opt, emb_matrix=emb_matrix)
+hrl_trainer = HRLTrainer(opt)
 
-id2label = dict([(v,k) for k,v in label2id.items()])
+id2label = dict([(v, k) for k, v in label2id.items()])
 dev_score_history = []
 current_lr = opt['lr']
 
@@ -126,50 +130,60 @@ format_str = '{}: step {}/{} (epoch {}/{}), loss = {:.6f} ({:.3f} sec/batch), lr
 max_steps = len(train_batch) * opt['num_epoch']
 
 # start training
-for epoch in range(1, opt['num_epoch']+1):
+for epoch in range(1, opt['num_epoch'] + 1):
     train_loss = 0
-    for i, batch in enumerate(train_batch):
-        start_time = time.time()
-        global_step += 1
-        loss = trainer.update(batch)
-        train_loss += loss
-        if global_step % opt['log_step'] == 0:
-            duration = time.time() - start_time
-            print(format_str.format(datetime.now(), global_step, max_steps, epoch,\
-                    opt['num_epoch'], loss, duration, current_lr))
+    for gcn_epoch in range(5):
+        for i, batch in enumerate(train_batch):
+            if epoch != 1:
+                new_batch = hrl_trainer.predict(batch)
+                loss = trainer.update(new_batch)
+            else:
+                loss = trainer.update(batch)
+            start_time = time.time()
+            global_step += 1
+            train_loss += loss
+            if global_step % opt['log_step'] == 0:
+                duration = time.time() - start_time
+                print(format_str.format(datetime.now(), global_step, max_steps, epoch, \
+                                        opt['num_epoch'], loss, duration, current_lr))
 
-    # eval on dev
-    print("Evaluating on dev set...")
-    predictions = []
-    dev_loss = 0
-    for i, batch in enumerate(dev_batch):
-        preds, _, loss = trainer.predict(batch)
-        predictions += preds
-        dev_loss += loss
-    predictions = [id2label[p] for p in predictions]
-    train_loss = train_loss / train_batch.num_examples * opt['batch_size'] # avg loss per batch
-    dev_loss = dev_loss / dev_batch.num_examples * opt['batch_size']
+        # eval on dev
+        print("Evaluating on dev set...")
+        predictions = []
+        dev_loss = 0
+        for i, batch in enumerate(dev_batch):
+            preds, _, loss = trainer.predict(batch)
+            predictions += preds
+            dev_loss += loss
+        predictions = [id2label[p] for p in predictions]
+        train_loss = train_loss / train_batch.num_examples * opt['batch_size']  # avg loss per batch
+        dev_loss = dev_loss / dev_batch.num_examples * opt['batch_size']
 
-    dev_score, _ = nary_scorer.score(dev_batch.gold(), predictions)
-    print("epoch {}: train_loss = {:.6f}, dev_loss = {:.6f}, dev_score = {:.4f}".format(epoch,\
-        train_loss, dev_loss, dev_score))
+        dev_score, _ = nary_scorer.score(dev_batch.gold(), predictions)
+        print("epoch {}: train_loss = {:.6f}, dev_loss = {:.6f}, dev_score = {:.4f}".format(epoch, \
+                                                                                            train_loss, dev_loss,
+                                                                                            dev_score))
 
-    # save
-    model_file = model_save_dir + '/checkpoint_epoch_{}.pt'.format(epoch)
-    trainer.save(model_file, epoch)
-    if epoch == 1 or dev_score > max(dev_score_history):
-        copyfile(model_file, model_save_dir + '/best_model.pt')
-        print("new best model saved.")
-    if epoch % opt['save_epoch'] != 0:
-        os.remove(model_file)
+        # save
+        model_file = model_save_dir + '/checkpoint_epoch_{}.pt'.format(epoch)
+        trainer.save(model_file, epoch)
+        if epoch == 1 or dev_score > max(dev_score_history):
+            copyfile(model_file, model_save_dir + '/best_model.pt')
+            print("new best model saved.")
+        if epoch % opt['save_epoch'] != 0:
+            os.remove(model_file)
 
-    # lr schedule
-    if len(dev_score_history) > opt['decay_epoch'] and dev_score <= dev_score_history[-1] and \
-            opt['optim'] in ['sgd', 'adagrad', 'adadelta']:
-        current_lr *= opt['lr_decay']
-        trainer.update_lr(current_lr)
+        # lr schedule
+        if len(dev_score_history) > opt['decay_epoch'] and dev_score <= dev_score_history[-1] and \
+                opt['optim'] in ['sgd', 'adagrad', 'adadelta']:
+            current_lr *= opt['lr_decay']
+            trainer.update_lr(current_lr)
 
-    dev_score_history += [dev_score]
-    print("")
+        dev_score_history += [dev_score]
+        print("")
+    for hrl_epoch in range(3):
+        for i, batch in enumerate(train_batch):
+            hrl_trainer.update(batch, trainer)
+        print("finish HRL training")
 
 print("Training ended with {} epochs.".format(epoch))

@@ -84,7 +84,7 @@ class DataLoader(object):
         self.label2id = constant.LABEL_TO_ID
         self.id2label = dict([(v, k) for k, v in self.label2id.items()])
 
-        self.labels = [self.id2label[d[-1]] for d in data]
+        self.labels = [self.id2label[d[-3]] for d in data]
         self.num_examples = len(data)
 
         # chunk into batches
@@ -110,7 +110,7 @@ class DataLoader(object):
         batch = list(zip(*batch))
 
         # for nary dataset
-        assert len(batch) == 9
+        #assert len(batch) == 9
 
         # sort all fields by lens for easy RNN operations
         lens = [len(x) for x in batch[0]]
@@ -133,8 +133,12 @@ class DataLoader(object):
         third_positions = get_long_tensor(batch[6], batch_size)
         cross = batch[7]
         rels = torch.LongTensor(batch[8])
+        sent_emb = batch[9]
+        split_idx = batch[10]
+        #print(words.shape, masks.shape, pos.shape, deprel.shape, head.shape, first_positions.shape, second_positions.shape, third_positions.shape, cross, rels.shape)
+        #torch.Size([50, 133(padding)])...[list with 50]torch.Size([50])
 
-        return (words, masks, pos, deprel, head, first_positions, second_positions, third_positions, cross, rels, orig_idx)
+        return (words, masks, pos, deprel, head, first_positions, second_positions, third_positions, cross, rels, orig_idx, sent_emb, split_idx)
 
 
 def map_to_ids(tokens, vocab):

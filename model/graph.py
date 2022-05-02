@@ -63,7 +63,6 @@ def head_to_tree(head, len_):
     """
     head = head[:len_].tolist()
     root = None
-
     nodes = [Tree() for _ in head]
 
     for i in range(len(nodes)):

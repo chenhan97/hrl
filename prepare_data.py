@@ -1,7 +1,5 @@
 import json
 from sentence_transformers import SentenceTransformer
-from hrlmodel.hrl_model import SentenceEncodeModule, HigherReinforceModule, LowerReinforceModule
-import torch
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
